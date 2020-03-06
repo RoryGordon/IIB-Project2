@@ -6,7 +6,6 @@ comport='/dev/cu.usbmodem14101' # Enter the COM port number. Default is comport=
 watermark='WordWord'  # Enter the two 4-letter words provided to you by the demonstrator. Default is watermark='WordWord'
 userids=['userid1','userid2']     # Enter list of lab group's userids; whoever is logged on should be listed first. Default is userids=['userid1','userid2']
 carnumber=0            # Enter the car number (integer in the range 1-8). Default is carnumber=0
-
 # DO NOT CHANGE ANYTHING BELOW THIS LINE
 
 #
@@ -101,9 +100,9 @@ def update():
 secs = 0
 
 
-file = '/Users/shuowanghe/github/IIB-Project/testinput.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/ringdown.csv'
 
-while secs<=20:
+while secs<=60:
     (millis, accx, accy, gyrz, encoder) = update()
     secs = millis/1000
     accx = accx/100
