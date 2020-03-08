@@ -7,26 +7,51 @@ from scipy import integrate
 from scipy.signal import find_peaks
 from matplotlib import animation
 
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/ringdown.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/userinput.csv'
 data = genfromtxt(file,delimiter=',')
 timestamps = data[:,0]
 a_r = data[:,1]
 a_theta = data[:,2]
 theta_dot = data[:,3]
-theta_zeros,_ = scipy.signal.find_peaks(abs(a_r),prominence=1)
+filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
+
+def get_theta(data):
+    timestamps = data[:,0]
+    a_r = data[:,1]
+    ang_vel = data[:,3]
+    filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
+    theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
+    theta = np.zeros(len(timestamps))
+    for _ in theta_zeros:
+        time_section = timestamps[_:]
+        theta_dot_section = ang_vel[_:]
+        theta[_:] = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
+    return theta
+
+theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
+theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
+
+plt.plot(timestamps,get_theta(data),label='Recalculated theta')
+plt.plot(timestamps[theta_zeros[0]:],theta,label='Theta from 1st calc')
+plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx')
+plt.legend()
+plt.show()
+
+
+
+
+plt.plot(timestamps,a_r,label='measured radial acc')
+plt.plot(timestamps,filtered_a_r,label='measured radial acc with filter')
+plt.plot(data[theta_zeros,0],filtered_a_r[theta_zeros],'x')
+plt.legend()
+plt.show()
 print(timestamps[theta_zeros])
-first_theta_zero_idx = theta_zeros[0]
-second_theta_zero_idx = theta_zeros[2]
-timestamps_trunc1 = timestamps[first_theta_zero_idx:]
-theta_dot_trunc1 = theta_dot[first_theta_zero_idx:]
-timestamps_trunc2 = timestamps[second_theta_zero_idx:]
-theta_dot_trunc2 = theta_dot[second_theta_zero_idx:]
 
 theta_double_dot = np.gradient(theta_dot,timestamps)
 filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_length=25, polyorder=3)
 
-theta1 = scipy.integrate.cumtrapz(theta_dot_trunc1,timestamps_trunc1)
-theta2 = scipy.integrate.cumtrapz(theta_dot_trunc2,timestamps_trunc2)
+theta = get_theta(data)
+
 
 t_init = data[0,0]
 t = np.linspace(t_init,30,1500)
@@ -46,14 +71,14 @@ def init():
 
 # animation function.  This is called sequentially
 def animate(i):
-    x = filtered_theta_double_dot[first_theta_zero_idx:i+first_theta_zero_idx]
-    y = np.sin(theta1[:i])
+    x = filtered_theta_double_dot[theta_zeros[0]:i+theta_zeros[0]]
+    y = np.sin(theta[theta_zeros[0]:i+theta_zeros[0]])
     line.set_data(x, y)
     return line,
 
 # call the animator.  blit=True means only re-draw the parts that have changed.
 anim = animation.FuncAnimation(fig, animate, init_func=init,
-                               frames=len(theta1), interval=20, blit=True)
+                               frames=len(theta), interval=20, blit=True)
 
 # save the animation as an mp4.  This requires ffmpeg or mencoder to be
 # installed.  The extra_args ensure that the x264 codec is used, so that
