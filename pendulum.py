@@ -31,19 +31,23 @@ def get_theta(data):
 theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
 theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
 
-plt.plot(timestamps,get_theta(data),label='Recalculated theta')
-plt.plot(timestamps[theta_zeros[0]:],theta,label='Theta from 1st calc')
-plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx')
-plt.legend()
+plt.plot(timestamps,get_theta(data),label=r'Re-zeroed $\theta$')
+plt.plot(timestamps[theta_zeros[0]:],theta,label=r'$\theta$ intergrated from 1st zero')
+plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx',label=r'$\theta=0$')
+plt.legend(loc='lower right')
+plt.title(r'Comparison of $\theta$ calculated from initial zero vs recalulated at every zero')
+plt.xlabel('time(s)')
+plt.ylabel(r'$\theta$(rad)')
 plt.show()
 
 
-
-
-plt.plot(timestamps,a_r,label='measured radial acc')
-plt.plot(timestamps,filtered_a_r,label='measured radial acc with filter')
+plt.plot(timestamps,a_r,label=r'measured $a_r$')
+plt.plot(timestamps,filtered_a_r,label=r'measured $a_r$ with Savitzky–Golay filter')
 plt.plot(data[theta_zeros,0],filtered_a_r[theta_zeros],'x')
 plt.legend()
+plt.title(r'Filtered vs unfiltered $a_r$, used to find all $\theta=0$')
+plt.xlabel('time(s)')
+plt.ylabel(r'$a_r$(m/$s^2$)')
 plt.show()
 print(timestamps[theta_zeros])
 
@@ -87,8 +91,9 @@ anim = animation.FuncAnimation(fig, animate, init_func=init,
 # http://matplotlib.sourceforge.net/api/animation_api.html
 
 #anim.save('basic_animation.mp4', fps=50, extra_args=['-vcodec', 'libx264'])
-plt.xlabel('sin(theta)')
-plt.ylabel('theta double dot')
+plt.xlabel(r'sin($\theta$)')
+plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
+plt.title(r'$\"{\theta}$ vs sin($\theta$)')
 plt.show()
 
 #plt.plot(timestamps,theta_dot,label='measured ang vel')
