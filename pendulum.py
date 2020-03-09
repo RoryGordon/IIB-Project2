@@ -1,3 +1,4 @@
+#Imports
 import numpy as np
 import matplotlib
 from matplotlib import pyplot as plt
@@ -7,14 +8,20 @@ from scipy import integrate
 from scipy.signal import find_peaks
 from matplotlib import animation
 
+#Gather and unpack data from CSV
 file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/userinput.csv'
 data = genfromtxt(file,delimiter=',')
 timestamps = data[:,0]
 a_r = data[:,1]
 a_theta = data[:,2]
 theta_dot = data[:,3]
+#Smooth the radial acceleration signal
 filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
+#Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
+theta_double_dot = np.gradient(theta_dot,timestamps)
+filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_length=25, polyorder=3)
 
+#Function for getting angle from gyro by re-integrating at every theta=0 to prevent drift
 def get_theta(data):
     timestamps = data[:,0]
     a_r = data[:,1]
@@ -28,9 +35,12 @@ def get_theta(data):
         theta[_:] = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
     return theta
 
+#Get theta=0 time stamps from filtered radial acceleration signal
 theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
+#Integrate gyro signal from first theta=0 to get angle vs time, but may drift
 theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
 
+#Plot to compare reintegrated theta vs once integrated theta
 plt.plot(timestamps,get_theta(data),label=r'Re-zeroed $\theta$')
 plt.plot(timestamps[theta_zeros[0]:],theta,label=r'$\theta$ intergrated from 1st zero')
 plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx',label=r'$\theta=0$')
@@ -40,7 +50,7 @@ plt.xlabel('time(s)')
 plt.ylabel(r'$\theta$(rad)')
 plt.show()
 
-
+#Plot to show filtered radial acceleration to find all theta=0 time stamps
 plt.plot(timestamps,a_r,label=r'measured $a_r$')
 plt.plot(timestamps,filtered_a_r,label=r'measured $a_r$ with Savitzky–Golay filter')
 plt.plot(data[theta_zeros,0],filtered_a_r[theta_zeros],'x')
@@ -49,38 +59,26 @@ plt.title(r'Filtered vs unfiltered $a_r$, used to find all $\theta=0$')
 plt.xlabel('time(s)')
 plt.ylabel(r'$a_r$(m/$s^2$)')
 plt.show()
-print(timestamps[theta_zeros])
 
-theta_double_dot = np.gradient(theta_dot,timestamps)
-filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_length=25, polyorder=3)
-
+#Use re-integrated theta from now on
 theta = get_theta(data)
 
-
-t_init = data[0,0]
-t = np.linspace(t_init,30,1500)
-initial = 4.5
-omega = 1.8
-amplitude = 9.81
-
-
+#Define the plot axes for the animation of sin(theta) vs ang accel
 fig = plt.figure()
 ax = plt.axes(xlim=(-10, 10), ylim=(-2,2))
 line, = ax.plot([], [], lw=2)
-
-
 def init():
     line.set_data([], [])
     return line,
 
-# animation function.  This is called sequentially
+#Animation function. This is called sequentially
 def animate(i):
     x = filtered_theta_double_dot[theta_zeros[0]:i+theta_zeros[0]]
     y = np.sin(theta[theta_zeros[0]:i+theta_zeros[0]])
     line.set_data(x, y)
     return line,
 
-# call the animator.  blit=True means only re-draw the parts that have changed.
+#Call the animator. blit=True means only re-draw the parts that have changed.
 anim = animation.FuncAnimation(fig, animate, init_func=init,
                                frames=len(theta), interval=20, blit=True)
 
@@ -90,12 +88,15 @@ anim = animation.FuncAnimation(fig, animate, init_func=init,
 # your system: for more information, see
 # http://matplotlib.sourceforge.net/api/animation_api.html
 
+#Save the animation
 #anim.save('basic_animation.mp4', fps=50, extra_args=['-vcodec', 'libx264'])
+#Plot the animation
 plt.xlabel(r'sin($\theta$)')
 plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
 plt.title(r'$\"{\theta}$ vs sin($\theta$)')
 plt.show()
 
+#Other plots for visualisation
 #plt.plot(timestamps,theta_dot,label='measured ang vel')
 #plt.plot(timestamps,0.53*a_theta,label='measured tangential acc')
 #plt.plot(timestamps,a_r,label='measured radial acc')
