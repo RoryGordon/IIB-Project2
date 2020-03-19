@@ -21,7 +21,7 @@ filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
 theta_double_dot = np.gradient(theta_dot,timestamps)
 filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_length=25, polyorder=3)
 
-#Function for getting angle from gyro by re-integrating at every theta=0 to prevent drift
+#Function for getting angle from gyro by re-integrating at every theta=0 and distributing the drift
 def get_theta(data):
     timestamps = data[:,0]
     a_r = data[:,1]
@@ -29,11 +29,24 @@ def get_theta(data):
     filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
     theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
     theta = np.zeros(len(timestamps))
-    for _ in theta_zeros:
+    for _ in theta_zeros: #hard re-integrate at every theta=0
         time_section = timestamps[_:]
         theta_dot_section = ang_vel[_:]
         theta[_:] = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
-    return theta
+    drifts = np.zeros(len(timestamps))
+    theta_int_once = scipy.integrate.cumtrapz(ang_vel[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
+    theta_fix = np.zeros(len(timestamps))
+    theta_fix[theta_zeros[0]:] = theta_int_once
+    prev_zero = theta_zeros[0]
+    for _ in theta_zeros[1:]: #reintegrate and correct drift
+        time_section = timestamps[prev_zero:_+1]
+        theta_dot_section = ang_vel[prev_zero:_+1]
+        theta_section = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
+        drift = theta_section[-1]
+        drift_vec = np.linspace(start=0,stop=drift,num=_-prev_zero+1)
+        theta_fix[prev_zero:_] = theta_section[:-1]-drift_vec[:-1]
+        prev_zero = _
+    return theta,theta_fix
 
 #Get theta=0 time stamps from filtered radial acceleration signal
 theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
@@ -44,7 +57,8 @@ theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zer
 def get_gradient(freeswing):
     data = genfromtxt(freeswing,delimiter=',')
     theta_zeros,_ = scipy.signal.find_peaks(scipy.signal.savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)
-    x = np.sin(get_theta(data))
+    theta = get_theta(data)[1]
+    x = np.sin(theta)
     y = scipy.signal.savgol_filter(np.gradient(data[:,3],data[:,0]),window_length=25, polyorder=3)
     p = np.polyfit(x,y,deg=1)
     p_favg = 0
@@ -78,7 +92,8 @@ def get_gradient(freeswing):
 
 
 #Plot to compare reintegrated theta vs once integrated theta
-plt.plot(timestamps,get_theta(data),label=r'Re-zeroed $\theta$')
+plt.plot(timestamps,get_theta(data)[0],label=r'Re-zeroed $\theta$',linewidth=5)
+plt.plot(timestamps,get_theta(data)[1],label=r'Re-zeroed and drift corrected $\theta$',linewidth=3)
 plt.plot(timestamps[theta_zeros[0]:],theta,label=r'$\theta$ intergrated from 1st zero')
 plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx',label=r'$\theta=0$')
 plt.legend(loc='lower right')
@@ -99,8 +114,8 @@ plt.show()
 
 p = get_gradient('/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/freeswing.csv')
 
-#Use re-integrated theta from now on
-theta = get_theta(data)
+#Use re-integrated, drift corrected theta from now on
+theta = get_theta(data)[1]
 
 #Define the plot axes for the animation of sin(theta) vs ang accel
 fig = plt.figure()
@@ -136,13 +151,16 @@ plt.title(r'$\"{\theta}$ vs sin($\theta$)')
 plt.show()
 
 #Plot bell angle against some force calculation
-plt.plot(timestamps[theta_zeros[0]:],filtered_theta_double_dot[theta_zeros[0]:]-p*np.sin(theta[theta_zeros[0]:]))
-plt.plot(timestamps[theta_zeros[0]:],theta[theta_zeros[0]:])
+force = filtered_theta_double_dot[theta_zeros[0]:]-p*np.sin(theta[theta_zeros[0]:])
+plt.plot(timestamps[theta_zeros[0]:],force,label="Force measurement")
+plt.plot(timestamps[theta_zeros[0]:],scipy.signal.savgol_filter(force,window_length=25, polyorder=3),label="Force measurement (Smoothed)")
+plt.plot(timestamps[theta_zeros[0]:],theta[theta_zeros[0]:],label=r'$\theta$')
 #plt.plot(timestamps[theta_zeros[0]:],filtered_theta_double_dot[theta_zeros[0]:])
 #plt.plot(timestamps[theta_zeros[0]:],p*np.sin(theta[theta_zeros[0]:]))
 plt.xlabel(r't(s)')
 plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
 plt.title(r'$\frac{T}{J}$ vs time')
+plt.legend()
 plt.show()
 
 #Animate Pendulum
