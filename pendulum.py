@@ -9,7 +9,7 @@ from scipy.signal import find_peaks
 from matplotlib import animation
 
 #Gather and unpack data from CSV
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/userinput.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/ringdown.csv'
 data = genfromtxt(file,delimiter=',')
 timestamps = data[:,0]
 a_r = data[:,1]
@@ -20,75 +20,51 @@ filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
 #Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
 theta_double_dot = np.gradient(theta_dot,timestamps)
 filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_length=25, polyorder=3)
+#Get theta=0 time stamps from filtered radial acceleration signal
+theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
+#Integrate gyro signal from first theta=0 to get angle vs time, but will drift
+theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
 
 #Function for getting angle from gyro by re-integrating at every theta=0 and distributing the drift
 def get_theta(data):
-    timestamps = data[:,0]
+    timestamps = data[:,0] #unpack the data again, filter a_r and find theta=0s
     a_r = data[:,1]
     ang_vel = data[:,3]
     filtered_a_r = scipy.signal.savgol_filter(a_r,window_length=21, polyorder=2)
     theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
-    theta = np.zeros(len(timestamps))
+    theta = np.zeros(len(timestamps)) #generate empty array to hold theta
     for _ in theta_zeros: #hard re-integrate at every theta=0
         time_section = timestamps[_:]
         theta_dot_section = ang_vel[_:]
         theta[_:] = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
-    drifts = np.zeros(len(timestamps))
     theta_int_once = scipy.integrate.cumtrapz(ang_vel[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
-    theta_fix = np.zeros(len(timestamps))
-    theta_fix[theta_zeros[0]:] = theta_int_once
-    prev_zero = theta_zeros[0]
+    theta_fix = np.zeros(len(timestamps)) #generate an array to hold the fixed theta
+    theta_fix[theta_zeros[0]:] = theta_int_once #put the hard integrated theta between the first 2 zeros
+    prev_zero = theta_zeros[0] #initiate the last theta=0 as the first one for the loop
     for _ in theta_zeros[1:]: #reintegrate and correct drift
-        time_section = timestamps[prev_zero:_+1]
+        time_section = timestamps[prev_zero:_+1] #carve out the section between the 2 zeros
         theta_dot_section = ang_vel[prev_zero:_+1]
-        theta_section = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0)
-        drift = theta_section[-1]
-        drift_vec = np.linspace(start=0,stop=drift,num=_-prev_zero+1)
-        theta_fix[prev_zero:_] = theta_section[:-1]-drift_vec[:-1]
-        prev_zero = _
-    return theta,theta_fix
-
-#Get theta=0 time stamps from filtered radial acceleration signal
-theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
-#Integrate gyro signal from first theta=0 to get angle vs time, but may drift
-theta = scipy.integrate.cumtrapz(theta_dot[theta_zeros[0]:],timestamps[theta_zeros[0]:],initial=0)
+        theta_section = scipy.integrate.cumtrapz(theta_dot_section,time_section,initial=0) #make the integration
+        drift = theta_section[-1] #find the drift at the end of the swing
+        drift_vec = np.linspace(start=0,stop=drift,num=_-prev_zero+1) #generate a vector increasing steadily from 0 to the drift over that time frame
+        theta_fix[prev_zero:_] = theta_section[:-1]-drift_vec[:-1] #make the correction so last theta=0
+        prev_zero = _ #store the zero point for the next loop
+    return theta,theta_fix #returns both the hard reintegrated theta and the drift-fixed theta
 
 #Function for getting the gradient in the sin(theta) vs ang accel equation
 def get_gradient(freeswing):
-    data = genfromtxt(freeswing,delimiter=',')
-    theta_zeros,_ = scipy.signal.find_peaks(scipy.signal.savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)
-    theta = get_theta(data)[1]
+    data = genfromtxt(freeswing,delimiter=',') #extract data from a freeswing run
+    theta = get_theta(data)[1] #get fixed theta from the freeswings
     x = np.sin(theta)
     y = scipy.signal.savgol_filter(np.gradient(data[:,3],data[:,0]),window_length=25, polyorder=3)
-    p = np.polyfit(x,y,deg=1)
-    p_favg = 0
-    p_bavg = 0
-    for n in range(14):
-        xforward = x[theta_zeros[2*n]:theta_zeros[2*n+1]]
-        yforward = y[theta_zeros[2*n]:theta_zeros[2*n+1]]
-        xbackward = x[theta_zeros[2*n+1]:theta_zeros[2*n+2]]
-        ybackward = y[theta_zeros[2*n+1]:theta_zeros[2*n+2]]
-        pf = np.polyfit(xforward,yforward,deg=1)
-        p_favg += pf[0]
-        pb = np.polyfit(xbackward,ybackward,deg=1)
-        p_bavg += pb[0]
-        print(pf[0],pb[0])
-        #plt.plot(xforward,yforward,'bx')
-        #plt.plot(xbackward,ybackward,'gx')
-        #plt.plot(x,pf[0]*x,'b-')
-        #plt.plot(x,pb[0]*x,'g-')
-        #plt.show()
-    p_favg /= 14
-    p_bavg /= 14
-    x = x[theta_zeros[0]:]
+    allowed_indices = np.where(abs(x)<0.5) #find indices where line is straight
+    p = np.polyfit(x[allowed_indices],y[allowed_indices],deg=1) #fit a line through all of the data points within the cutoff
+    x = x[theta_zeros[0]:] #use points after the first theta=zero
     y = y[theta_zeros[0]:]
-    plt.plot(x,y,'x')
-    plt.plot(x,p_favg*x)
-    plt.plot(x,p_bavg*x)
-    plt.plot(x,(p_favg+p_bavg)*x/2)
+    plt.plot(x,y,'x') #plot all the data points
+    plt.plot(x,p[0]*x,'r') #plot the fitted line, through the origin
     plt.show()
-    print(p[0],p_favg,p_bavg,p_favg/2+p_bavg/2)
-    return p_favg/2+p_bavg/2
+    return p[0]
 
 
 #Plot to compare reintegrated theta vs once integrated theta
@@ -194,14 +170,14 @@ plt.show()
 
 
 #Other plots for visualisation
-plt.plot(timestamps,theta_dot,label='measured ang vel')
-plt.plot(timestamps,a_theta,label='measured tangential acc')
-plt.plot(timestamps,a_r,label='measured radial acc')
+#plt.plot(timestamps,theta_dot,label='measured ang vel')
+plt.plot(timestamps,scipy.signal.savgol_filter(a_theta,window_length=21, polyorder=2),label='measured tangential acc')
+#plt.plot(timestamps,a_r,label='measured radial acc')
 #plt.plot(timestamps_trunc1[:-1],theta1,label='theta (from integration)')
 #plt.plot(timestamps_trunc2[:-1],abs(theta2),'b')
 #plt.plot(data[theta_zeros,0],theta_dot[theta_zeros],'x')
-plt.plot(timestamps,theta_double_dot,label='theta double dot (from diff)')
-plt.plot(timestamps,filtered_theta_double_dot,label='theta double dot (from diff and filtered)')
+#plt.plot(timestamps,theta_double_dot,label='theta double dot (from diff)')
+#plt.plot(timestamps,filtered_theta_double_dot,label='theta double dot (from diff and filtered)')
 #plt.plot(timestamps_trunc1[:-1],9.81*np.cos(theta1)+0.43*np.square(theta_dot_trunc1[:-1]),label='radial acc prediction')
 #plt.plot(timestamps_trunc1[:-1],a_r[first_theta_zero_idx:-1]-9.81*np.cos(theta1),label='r thetadot^2')
 #plt.plot(timestamps_trunc1[:-1],a_r[first_theta_zero_idx:-1]+9.81*np.sin(theta1),label='L theta double dot')
