@@ -7,9 +7,10 @@ import scipy
 from scipy import integrate
 from scipy.signal import find_peaks
 from matplotlib import animation
+from statsmodels.graphics import tsaplots
 
 #Gather and unpack data from CSV
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/ringdown.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/freeswing.csv'
 data = genfromtxt(file,delimiter=',')
 timestamps = data[:,0]
 a_r = data[:,1]
@@ -70,10 +71,10 @@ def get_gradient(freeswing):
 #Plot to compare reintegrated theta vs once integrated theta
 plt.plot(timestamps,get_theta(data)[0],label=r'Re-zeroed $\theta$',linewidth=5)
 plt.plot(timestamps,get_theta(data)[1],label=r'Re-zeroed and drift corrected $\theta$',linewidth=3)
-plt.plot(timestamps[theta_zeros[0]:],theta,label=r'$\theta$ intergrated from 1st zero')
+plt.plot(timestamps[theta_zeros[0]:],theta,label=r'$\theta$ integrated from 1st zero')
 plt.plot(timestamps[theta_zeros],np.zeros(len(theta_zeros)),'gx',label=r'$\theta=0$')
 plt.legend(loc='lower right')
-plt.title(r'Comparison of $\theta$ calculated from initial zero vs recalulated at every zero')
+plt.title(r'Comparison of $\theta$ calculated from initial zero vs recalculated at every zero')
 plt.xlabel('time(s)')
 plt.ylabel(r'$\theta$(rad)')
 plt.show()
@@ -88,7 +89,7 @@ plt.xlabel('time(s)')
 plt.ylabel(r'$a_r$(m/$s^2$)')
 plt.show()
 
-p = get_gradient('/Users/shuowanghe/github/IIB-Project2/data/adafruitmarch6th/freeswing.csv')
+p = get_gradient('/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/freeswing.csv')
 
 #Use re-integrated, drift corrected theta from now on
 theta = get_theta(data)[1]
@@ -119,7 +120,8 @@ anim = animation.FuncAnimation(fig, animate, init_func=init,
 # http://matplotlib.sourceforge.net/api/animation_api.html
 
 #Save the animation
-#anim.save('basic_animation.mp4', fps=50, extra_args=['-vcodec', 'libx264'])
+#anim.save('2sidepush.gif', fps=50, extra_args=['-vcodec', 'libx264'])
+
 #Plot the animation
 plt.xlabel(r'sin($\theta$)')
 plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
@@ -128,16 +130,77 @@ plt.show()
 
 #Plot bell angle against some force calculation
 force = filtered_theta_double_dot[theta_zeros[0]:]-p*np.sin(theta[theta_zeros[0]:])
+peaks,_ = scipy.signal.find_peaks(abs(scipy.signal.savgol_filter(force,window_length=25, polyorder=3)),prominence=None)
+tsaplots.plot_acf(force,lags=2000)
+plt.show()
 plt.plot(timestamps[theta_zeros[0]:],force,label="Force measurement")
+#plt.plot(timestamps[theta_zeros[0]:][peaks],scipy.signal.savgol_filter(force,window_length=25, polyorder=3)[peaks],'x')
 plt.plot(timestamps[theta_zeros[0]:],scipy.signal.savgol_filter(force,window_length=25, polyorder=3),label="Force measurement (Smoothed)")
 plt.plot(timestamps[theta_zeros[0]:],theta[theta_zeros[0]:],label=r'$\theta$')
+plt.plot(timestamps[theta_zeros[0]:],theta_dot[theta_zeros[0]:],label=r'$\dot{\theta}$')
+
+
 #plt.plot(timestamps[theta_zeros[0]:],filtered_theta_double_dot[theta_zeros[0]:])
 #plt.plot(timestamps[theta_zeros[0]:],p*np.sin(theta[theta_zeros[0]:]))
 plt.xlabel(r't(s)')
 plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
+plt.axhline(0,color='b',linestyle='--')
 plt.title(r'$\frac{T}{J}$ vs time')
 plt.legend()
 plt.show()
+print(-p)
+plt.plot(-p*np.sin(theta[theta_zeros[0]:]),force)
+plt.show()
+
+#Define the plot axes for the animation of something
+fig = plt.figure()
+ax = plt.axes(xlim=(-5, 5), ylim=(-1,1))
+line, = ax.plot([], [], lw=2)
+def init_relation():
+    line.set_data([], [])
+    return line,
+
+#Animation function. This is called sequentially
+def animate_relation(i):
+    y = force[:i]
+    x = -p*np.sin(theta[theta_zeros[0]:i+theta_zeros[0]])
+    line.set_data(x, y)
+    return line,
+
+#Call the animator. blit=True means only re-draw the parts that have changed.
+anim_relation = animation.FuncAnimation(fig, animate_relation, init_func=init,
+                               frames=len(theta), interval=1, blit=True)
+
+# save the animation as an mp4.  This requires ffmpeg or mencoder to be
+# installed.  The extra_args ensure that the x264 codec is used, so that
+# the video can be embedded in html5.  You may need to adjust this for
+# your system: for more information, see
+# http://matplotlib.sourceforge.net/api/animation_api.html
+
+#Save the animation
+#anim.save('2sidepush.gif', fps=50, extra_args=['-vcodec', 'libx264'])
+
+#Plot the animation
+plt.show()
+
+checked_force = np.zeros(len(force))
+convex_checker1 = np.gradient(scipy.signal.savgol_filter(force,window_length=25, polyorder=3),timestamps[theta_zeros[0]:])
+convex_checker2 = np.gradient(scipy.signal.savgol_filter(convex_checker1,window_length=25, polyorder=3),timestamps[theta_zeros[0]:])
+for i in range(len(convex_checker1)):
+    if convex_checker1[i] > 0:
+        checked_force[i]=scipy.signal.savgol_filter(force,window_length=25, polyorder=3)[i]
+
+
+plt.plot(timestamps[theta_zeros[0]:],checked_force)
+plt.show()
+
+plt.plot(timestamps[theta_zeros[0]:],abs(scipy.signal.savgol_filter(force,window_length=25, polyorder=3)),label="Force measurement (Smoothed)")
+plt.plot(timestamps[theta_zeros[0]:],convex_checker1,label="Diff1")
+plt.plot(timestamps[theta_zeros[0]:],convex_checker2,label="Diff2")
+plt.legend()
+plt.show()
+
+
 
 #Animate Pendulum
 fig_pend = plt.figure()
@@ -161,7 +224,7 @@ def animate_pend(i):
 #Call the animator. blit=True means only re-draw the parts that have changed.
 anim_pend = animation.FuncAnimation(fig_pend, animate_pend, init_func=init_pend,
                                frames=len(theta), interval=20, blit=True)
-
+#anim_pend.save('2sidepush_force.gif', fps=50, extra_args=['-vcodec', 'libx264'])
 plt.title('Bell swinging and force applied')
 plt.legend()
 plt.show()
