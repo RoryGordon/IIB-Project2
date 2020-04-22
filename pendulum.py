@@ -37,8 +37,8 @@ def get_theta(data,theta_dot_correction_factor):
     return theta_fix #returns the drift-fixed theta
 
 #Function for getting the gradient in the sin(theta) vs ang accel equation
-def get_gradient(data,theta_dot_correction_factor):
-    theta = get_theta(data,theta_dot_correction_factor) #get drift corrected theta from the data
+def get_gradient(data,theta_dot_correction_factor,theta_offset):
+    theta = get_theta(data,theta_dot_correction_factor)+theta_offset #get drift corrected theta from the data
     timestamps = data[:,0]
     theta_dot = data[:,3]*theta_dot_correction_factor
     theta_double_dot = np.gradient(theta_dot,timestamps)
@@ -61,8 +61,9 @@ def get_gradient(data,theta_dot_correction_factor):
 #Gather and unpack data from CSV
 file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/freeswing.csv'
 data = genfromtxt(file,delimiter=',')
-theta_dot_correction_factor = 1.08
+theta_dot_correction_factor = 1.07
 gradient_correction_factor = 1.05
+theta_offset = -0.02 #+ve curves with curve centre in lower left and vice versa
 timestamps = data[:,0]
 a_r = data[:,1]
 a_theta = data[:,2]
@@ -76,9 +77,9 @@ filtered_theta_double_dot = scipy.signal.savgol_filter(theta_double_dot,window_l
 theta_zeros,_ = scipy.signal.find_peaks(filtered_a_r,prominence=5)
 
 #get the -mlg/J gradient from fitting the straight part of the graph
-p = get_gradient(data,theta_dot_correction_factor)*gradient_correction_factor
+p = get_gradient(data,theta_dot_correction_factor,theta_offset)*gradient_correction_factor
 #Use re-integrated, drift corrected theta from now on
-theta = get_theta(data,theta_dot_correction_factor)
+theta = get_theta(data,theta_dot_correction_factor)+theta_offset
 #Calculate some force quantity T/J
 force = filtered_theta_double_dot[theta_zeros[0]:]-p*np.sin(theta[theta_zeros[0]:])
 
