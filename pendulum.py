@@ -60,12 +60,12 @@ def get_gradient(data):
 ###---------------------------DATA-&-OPTIMISATION---------------------------###
 ###-------------------------------------------------------------------------###
 #Gather and unpack data from CSV
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/freeswing.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/2sidepush.csv'
 data = genfromtxt(file,delimiter=',')
 timestamps,a_r,a_theta,theta_dot = data[:,0], data[:,1], data[:,2], data[:,3]
 #Optimise correction parameters
 def force_func(corrections):
-    file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/freeswing.csv'
+    file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitapril15th/2sidepush.csv'
     data = genfromtxt(file,delimiter=',')
     theta_correction_factor,gradient_correction_factor,theta_offset = corrections[0],corrections[1],corrections[2]
     theta = get_theta(data)*theta_correction_factor+theta_offset
@@ -94,12 +94,13 @@ p = get_gradient(data)*gradient_correction_factor
 theta = get_theta(data)*theta_correction_factor+theta_offset
 #Calculate some force quantity T/J
 force = filtered_theta_double_dot[start:]-p*np.sin(theta[start:])
-smooth_force = savgol_filter(force,window_length=25,polyorder=3)
+smooth_force = savgol_filter(force,window_length=45,polyorder=3)
 
 ###-------------------------------------------------------------------------###
 ###--------------------------------ANIMATIONS-------------------------------###
 ###-------------------------------------------------------------------------###
 #THETA_DOUBLE_DOT vs SIN(THETA) ANIMATION
+"""
 fig = plt.figure()
 ax = plt.axes(xlim=(-1.5, 1.5), ylim=(-10,10))
 line, = ax.plot([], [], lw=1)
@@ -173,11 +174,12 @@ plt.xlabel(r'$\dot{\theta}$')
 plt.ylabel(r'Some force $\frac{T}{J}$')
 plt.title(r'Force vs $\dot{\theta}$')
 plt.show()
-
+"""
 ###-------------------------------------------------------------------------###
 ###----------------------------------PLOTS----------------------------------###
 ###-------------------------------------------------------------------------###
 #Plot line fit through theta double dot vs sin(theta) relationship
+"""
 allowed_indices = np.where(abs(x)<20.2) #find indices where line is straight
 x = np.sin(theta[start:])
 y = filtered_theta_double_dot[start:]
@@ -188,7 +190,7 @@ plt.xlabel(r'sin($\theta$)')
 plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
 plt.title(r'$\"{\theta}$ vs sin($\theta$) with a line fitted through')
 plt.show()
-
+"""
 #Force, theta and theta_dot vs time
 plt.plot(timestamps[start:],force,label="Force measurement")
 plt.plot(timestamps[start:],smooth_force,label="Force measurement (Smoothed)")
@@ -202,6 +204,56 @@ plt.axhline(0,color='b',linestyle='--')
 plt.legend()
 plt.show()
 
+#Force, theta and theta_dot vs time
+peaks,_ = find_peaks(abs(smooth_force),prominence=0.5)
+def forcefinder(force):
+    smooth_force = savgol_filter(force,window_length=45,polyorder=3)
+    peaks,_ = find_peaks(abs(smooth_force),prominence=0.5)
+    peak_matrix = np.zeros((len(peaks),3))
+    peak_matrix[:,1] = peaks
+    peaks = np.append(peaks,len(smooth_force))
+    prev_peak = 0
+    count = 0
+    for i in peaks:
+        mini_peaks_before,_ = find_peaks(abs(smooth_force)[prev_peak:i],prominence=0)
+        begin = mini_peaks_before[-1]+prev_peak
+        prev_end = mini_peaks_before[0]+prev_peak
+        if count != len(peaks)-1:
+            peak_matrix[count,0] = begin
+        if count != 0:
+            peak_matrix[count-1,2] = prev_end
+        prev_peak = i
+        count+=1
+    return peak_matrix
+
+peak_matrix = forcefinder(force).astype(int)
+peak_matrix
+"""
+plt.plot(timestamps[peaks[0]:peaks[1]],abs(smooth_force)[peaks[0]:peaks[1]])
+mini_peaks_before,_ = find_peaks(abs(smooth_force)[peaks[0]:peaks[1]],prominence=0.1)
+mini_peaks_before
+peaks[1]
+plt.plot(timestamps[peaks[0]:peaks[1]][mini_peaks_before[0]],abs(smooth_force)[peaks[0]:peaks[1]][mini_peaks_before[0]],'x')
+plt.plot(timestamps[peaks[0]:peaks[1]][mini_peaks_before[-1]],abs(smooth_force)[peaks[0]:peaks[1]][mini_peaks_before[-1]],'x')
+"""
+
+
+plt.plot(timestamps[start:],abs(force),label="Force measurement")
+plt.plot(timestamps[start:],abs(smooth_force),label="Force measurement (Smoothed)")
+
+plt.plot(timestamps[start:][peaks],abs(smooth_force)[peaks],'x')
+plt.plot(timestamps[start:][peak_matrix[:,0]],abs(smooth_force)[peak_matrix[:,0]],'x')
+plt.plot(timestamps[start:][peak_matrix[:,2]],abs(smooth_force)[peak_matrix[:,2]],'x')
+plt.plot(timestamps[start:],abs(theta[start:]),label=r'$\theta$')
+#plt.plot(timestamps[start:],abs(theta_dot[start:]),label=r'$\dot{\theta}$')
+plt.axhline(0,color='b',linestyle='--')
+plt.xlabel(r't(s)')
+plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
+plt.title(r'$\frac{T}{J}$ vs time')
+plt.axhline(0,color='b',linestyle='--')
+plt.legend()
+plt.show()
+"""
 #Plot Force vs (mlg/J)sin(theta)
 plt.plot(-p*np.sin(theta[start:]),smooth_force)
 plt.xlabel(r'$\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
@@ -215,3 +267,4 @@ plt.xlabel(r'$\dot{\theta}$')
 plt.ylabel(r'$\frac{T}{J}$')
 plt.title(r'Force vs $\dot{\theta}$')
 plt.show()
+"""
