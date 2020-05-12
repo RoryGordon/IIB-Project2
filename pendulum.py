@@ -8,11 +8,28 @@ from numpy import genfromtxt
 import scipy
 from scipy import integrate
 from scipy.optimize import least_squares
-from scipy.optimize import basinhopping
 from scipy.signal import find_peaks
 from scipy.signal import savgol_filter
 from scipy.integrate import cumtrapz
 from matplotlib import animation
+###-------------------------------------------------------------------------###
+###------------------------UNPACK DATA AND GET ZEROS------------------------###
+###-------------------------------------------------------------------------###
+#Gather and unpack data from CSV
+userinput_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/userinput.csv'
+userinput = genfromtxt(userinput_file,delimiter=',')
+freeswing_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/freeswing.csv'
+freeswing = genfromtxt(freeswing_file,delimiter=',')
+timestamps,a_r,a_theta,theta_dot = userinput[:,0], userinput[:,1], userinput[:,2], userinput[:,3]
+#Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
+theta_double_dot = np.gradient(theta_dot,timestamps)
+filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
+#Smooth the radial acceleration signal to find theta=zeros
+filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
+theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
+start = theta_zeros[0]
+free_start_zeros,_ = find_peaks(savgol_filter(freeswing[:,1],window_length=21, polyorder=2),prominence=5)
+free_start = free_start_zeros[0]
 ###-------------------------------------------------------------------------###
 ###--------------------------------FUNCTIONS--------------------------------###
 ###-------------------------------------------------------------------------###
@@ -42,19 +59,15 @@ def get_theta(data):
 
 #Function for getting the gradient in the sin(theta) vs ang accel equation
 def get_gradient(data):
-    #find theta=zeros
-    a_r = data[:,1]
-    filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
-    theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
-    theta = get_theta(data) #get drift corrected theta from the data
+    theta = get_theta(data) #get drift corrected theta from the data    #find theta=zeros
     timestamps = data[:,0]
     theta_dot = data[:,3]
+    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)[0][0]
     theta_double_dot = np.gradient(theta_dot,timestamps)
-    x = np.sin(theta)[theta_zeros[0]:]
-    y = savgol_filter(theta_double_dot,window_length=25, polyorder=3)[theta_zeros[0]:]
-    allowed_indices = np.where(abs(x)<20.2) #find indices where line is straight
-    p = np.polyfit(x[allowed_indices],y[allowed_indices],deg=1) #fit a line through all of the data points within the cutoff
-    return p[0]
+    x = np.sin(theta)[start:]
+    y = savgol_filter(theta_double_dot,window_length=25, polyorder=3)[start:]
+    p = np.polyfit(x,y,deg=1)[0] #fit a line through all of the data points
+    return p
 
 #Function for finding where force is being applied
 def forcefinder(force):
@@ -76,48 +89,38 @@ def forcefinder(force):
             peak_matrix[count-1,2] = prev_end
         prev_peak = i
         count+=1
-    return peak_matrix
-###-------------------------------------------------------------------------###
-###---------------------------DATA-&-OPTIMISATION---------------------------###
-###-------------------------------------------------------------------------###
+    return peak_matrix.astype(int)
 
-#Gather and unpack data from CSV
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/userinput.csv'
-data = genfromtxt(file,delimiter=',')
-timestamps,a_r,a_theta,theta_dot = data[:,0], data[:,1], data[:,2], data[:,3]
+###-------------------------------------------------------------------------###
+###-------------------------------OPTIMISATION------------------------------###
+###-------------------------------------------------------------------------###
 #Optimise correction parameters for freeswing
 def force_func(corrections):
-    file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/freeswing.csv'
-    data = genfromtxt(file,delimiter=',')
     theta_correction_factor,gradient_correction_factor,theta_offset = corrections[0],corrections[1],corrections[2]
-    theta = get_theta(data)*theta_correction_factor+theta_offset
-    theta_double_dot = np.gradient(data[:,3],data[:,0])
+    theta = get_theta(freeswing)*theta_correction_factor+theta_offset
+    theta_double_dot = np.gradient(freeswing[:,3],freeswing[:,0])
     filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)*theta_correction_factor
-    p = get_gradient(data)*gradient_correction_factor
-    filtered_a_r = savgol_filter(data[:,1],window_length=21, polyorder=2)
-    theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
-    force = filtered_theta_double_dot[theta_zeros[0]:]-p*np.sin(theta[theta_zeros[0]:])
+    p = get_gradient(freeswing)*gradient_correction_factor
+    force = filtered_theta_double_dot[start:]-p*np.sin(theta[start:])
     return sum(abs(force))
 res=least_squares(fun=force_func, x0=[1,1,0])
 print("theta factor: ",res.x[0],"\ngradient factor: ",res.x[1],"\ntheta offset: ",res.x[2],"\ncost: ",res.fun)
 theta_correction_factor,gradient_correction_factor,theta_offset = res.x[0],res.x[1],res.x[2]
-#Smooth the radial acceleration signal to find theta=zeros
-filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
-theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
-start = theta_zeros[0] #define when the first theta=0
-#Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
-theta_double_dot = np.gradient(theta_dot,timestamps)
-filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25,polyorder=3)*theta_correction_factor
-#get the -mlg/J gradient from fitting the straight part of the graph
-p = get_gradient(data)*gradient_correction_factor
+#get the -mlg/J gradient from fitting the userinput graph
+p = get_gradient(userinput)
 #Use re-integrated, drift corrected theta from now on
-theta = get_theta(data)*theta_correction_factor+theta_offset
-
-#Calculate some force quantity T/J
+theta = get_theta(userinput)
+#Calculate some force quantity T/J using just the userinput data
 force = filtered_theta_double_dot[start:]-p*np.sin(theta[start:])
-smooth_force = savgol_filter(force,window_length=45,polyorder=3)
+smooth_force = savgol_filter(force,window_length=25, polyorder=3)
+#Calculate it post corrections from freeswing data
+p_corrected = p*gradient_correction_factor
+theta_corrected = theta*theta_correction_factor+theta_offset
+theta_dot_corrected = theta_dot*theta_correction_factor
+force_corrected = theta_correction_factor*filtered_theta_double_dot[start:]-p_corrected*np.sin(theta_corrected[start:])
+smooth_force_corrected = savgol_filter(force_corrected,window_length=25, polyorder=3)
 #get the indices where force is being applied and released
-peak_matrix = forcefinder(force).astype(int)
+peak_matrix = forcefinder(force_corrected)
 theta_dot_zeros,_ = find_peaks(abs(theta_dot[start:]),prominence=1)
 #get following data but when force isnt applied
 no_force_times = timestamps[start:]
@@ -135,31 +138,75 @@ def force_func2(corrections):
     theta_correction_factor,gradient_correction_factor,theta_offset = corrections[0],corrections[1],corrections[2]
     theta = no_force_theta*theta_correction_factor+theta_offset
     filtered_theta_double_dot = no_force_filtered_theta_double_dot*theta_correction_factor
-    p = np.polyfit(np.sin(theta),filtered_theta_double_dot,deg=1)[0]*gradient_correction_factor
-    force = filtered_theta_double_dot[start:]-p*np.sin(theta[start:])
+    p = get_gradient(userinput)*gradient_correction_factor
+    force = filtered_theta_double_dot-p*np.sin(theta)
     return sum(abs(force))
-
 res2=least_squares(fun=force_func2, x0=[1,1,0])
-print("theta factor: ",res2.x[0],"\ngradient factor: ",res2.x[1],"\ntheta offset: ",res2.x[2],"\ncost: ",res2.fun)
-print("Total Corrections:","\ntheta factor: ",res.x[0]*res2.x[0],"\ngradient factor: ",res.x[1]*res2.x[1],"\ntheta offset: ",res.x[2]+res2.x[2])
-theta_correction_factor,gradient_correction_factor,theta_offset = res2.x[0],res2.x[1],res2.x[2]
-force2 = filtered_theta_double_dot[start:]*theta_correction_factor-gradient_correction_factor*p*np.sin(theta[start:]*theta_correction_factor+theta_offset)
-plt.plot(timestamps[start:],force)
-plt.plot(timestamps[start:],force2)
+print("theta factor 2: ",res2.x[0],"\ngradient factor 2: ",res2.x[1],"\ntheta offset 2: ",res2.x[2],"\ncost 2: ",res2.fun)
+theta_correction_factor2,gradient_correction_factor2,theta_offset2 = res2.x[0],res2.x[1],res2.x[2]
+theta_corrected2 = theta*theta_correction_factor2+theta_offset2
+p_corrected2 = p*gradient_correction_factor2
+theta_dot_corrected2 = theta_dot*theta_correction_factor2
+force_corrected2 = filtered_theta_double_dot[start:]*theta_correction_factor2-p_corrected2*np.sin(theta_corrected2[start:])
+smooth_force_corrected2 = savgol_filter(force_corrected2,window_length=35, polyorder=3)
+###-------------------------------------------------------------------------###
+###-------------------------------UNCERTAINTY-------------------------------###
+###-------------------------------------------------------------------------###
+def remove_mean(data):
+    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)[0][0]
+    theta_double_dot = np.gradient(data[:,3],data[:,0])[start:]
+    filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
+    p = get_gradient(data)
+    theta = get_theta(data)[start:]
+    force = filtered_theta_double_dot-p*np.sin(theta)
+    no_bins = 20
+    means_variance = np.zeros([no_bins,2])
+    free_theta = get_theta(freeswing)[free_start:]
+    free_p = get_gradient(freeswing)
+    free_theta_double_dot = np.gradient(freeswing[:,3][free_start:],freeswing[:,0][free_start:])
+    free_filtered_theta_double_dot = savgol_filter(free_theta_double_dot,window_length=25, polyorder=3)
+    free_force = free_filtered_theta_double_dot-free_p*np.sin(free_theta)
+    fixed_force = filtered_theta_double_dot-p*np.sin(theta)
+    for bin in range(no_bins):
+        bin_start = (bin-no_bins/2)*2*np.pi/no_bins
+        bin_end = (bin-no_bins/2+1)*2*np.pi/no_bins
+        free_bin_indices = np.where((free_theta>=bin_start)&(free_theta<bin_end))
+        data_bin_indices = np.where((theta>=bin_start)&(theta<bin_end))
+        if np.size(free_bin_indices)>0:
+            means_variance[bin,0] = np.mean(free_force[free_bin_indices])
+            means_variance[bin,1] = np.var(free_force[free_bin_indices])
+            fixed_force[data_bin_indices] = force[data_bin_indices] - means_variance[bin,0]
+    return fixed_force, means_variance
 
+peak_matrix2 = forcefinder(force_corrected2)
+little_peaks = find_peaks(-abs(smooth_force_corrected2),height=-0.5)[0]
+force_curve = np.zeros(len(force_corrected2))
 
+for _ in peak_matrix[:,1]:
+    force_start = max(little_peaks[little_peaks<_])
+    force_end = min(little_peaks[little_peaks>_])
+    force_curve[force_start:force_end] = smooth_force_corrected2[force_start:force_end]
 
+plt.plot(timestamps[start:],abs(smooth_force_corrected2))
+plt.plot(timestamps[start:],abs(force_curve))
+# plt.plot(timestamps[start:],-abs(smooth_force_corrected2))
+# plt.plot(timestamps[start:][little_peaks],-abs(smooth_force_corrected2)[little_peaks],'x')
+plt.show()
 
-plt.plot(timestamps[start:],smooth_force)
-plt.plot(timestamps[start:][peak_matrix[:,1]],smooth_force[peak_matrix[:,1]],'x')
-plt.plot(timestamps[start:][peak_matrix[:,0]],smooth_force[peak_matrix[:,0]],'x')
-plt.plot(timestamps[start:][peak_matrix[:,2]],smooth_force[peak_matrix[:,2]],'x')
+# plt.plot(timestamps[start:],abs(force_corrected2))
+# plt.plot(timestamps[start:],abs(smooth_force_corrected2))
+# plt.plot(timestamps[start:],-abs(force_corrected2))
+# plt.show()
+# plt.plot(timestamps[start:][peak_matrix2[:,0]],abs(smooth_force_corrected2)[peak_matrix2[:,0]],'x')
+# plt.plot(timestamps[start:][peak_matrix2[:,2]],abs(smooth_force_corrected2)[peak_matrix2[:,2]],'x')
+# plt.show()
 
+"""
 ###-------------------------------------------------------------------------###
 ###--------------------------------ANIMATIONS-------------------------------###
 ###-------------------------------------------------------------------------###
 #THETA_DOUBLE_DOT vs SIN(THETA) ANIMATION
-"""
+
 fig = plt.figure()
 ax = plt.axes(xlim=(-1.5, 1.5), ylim=(-10,10))
 line, = ax.plot([], [], lw=1)
@@ -231,7 +278,7 @@ plt.xlabel(r'$\dot{\theta}$')
 plt.ylabel(r'Some force $\frac{T}{J}$')
 plt.title(r'Force vs $\dot{\theta}$')
 plt.show()
-"""
+
 ###-------------------------------------------------------------------------###
 ###----------------------------------PLOTS----------------------------------###
 ###-------------------------------------------------------------------------###
@@ -284,7 +331,7 @@ plt.legend()
 plt.show()
 
 
-"""
+
 #Plot Force vs (mlg/J)sin(theta)
 plt.plot(-p*np.sin(theta[start:]),smooth_force)
 plt.xlabel(r'$\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')

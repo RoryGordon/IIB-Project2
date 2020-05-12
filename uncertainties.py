@@ -8,12 +8,9 @@ from numpy import genfromtxt
 import scipy
 from scipy import integrate
 from scipy.optimize import least_squares
-from scipy.optimize import basinhopping
 from scipy.signal import find_peaks
 from scipy.signal import savgol_filter
 from scipy.integrate import cumtrapz
-from matplotlib import animation
-from statsmodels.graphics import tsaplots
 ###-------------------------------------------------------------------------###
 ###------------------------UNPACK DATA AND GET ZEROS------------------------###
 ###-------------------------------------------------------------------------###
@@ -64,10 +61,7 @@ def get_gradient(data):
     theta = get_theta(data) #get drift corrected theta from the data    #find theta=zeros
     timestamps = data[:,0]
     theta_dot = data[:,3]
-    a_r = data[:,1]
-    filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
-    theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
-    start = theta_zeros[0]
+    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)[0][0]
     theta_double_dot = np.gradient(theta_dot,timestamps)
     x = np.sin(theta)[start:]
     y = savgol_filter(theta_double_dot,window_length=25, polyorder=3)[start:]
@@ -124,7 +118,6 @@ theta_corrected = theta*theta_correction_factor+theta_offset
 theta_dot_corrected = theta_dot*theta_correction_factor
 force_corrected = theta_correction_factor*filtered_theta_double_dot[start:]-p_corrected*np.sin(theta_corrected[start:])
 smooth_force_corrected = savgol_filter(force_corrected,window_length=25, polyorder=3)
-
 #get the indices where force is being applied and released
 peak_matrix = forcefinder(force_corrected).astype(int)
 theta_dot_zeros,_ = find_peaks(abs(theta_dot[start:]),prominence=1)
@@ -147,7 +140,6 @@ def force_func2(corrections):
     p = get_gradient(userinput)*gradient_correction_factor
     force = filtered_theta_double_dot-p*np.sin(theta)
     return sum(abs(force))
-
 res2=least_squares(fun=force_func2, x0=[1,1,0])
 print("theta factor 2: ",res2.x[0],"\ngradient factor 2: ",res2.x[1],"\ntheta offset 2: ",res2.x[2],"\ncost 2: ",res2.fun)
 theta_correction_factor2,gradient_correction_factor2,theta_offset2 = res2.x[0],res2.x[1],res2.x[2]
@@ -156,90 +148,56 @@ p_corrected2 = p*gradient_correction_factor2
 theta_dot_corrected2 = theta_dot*theta_correction_factor2
 force_corrected2 = filtered_theta_double_dot[start:]*theta_correction_factor2-p_corrected2*np.sin(theta_corrected2[start:])
 smooth_force_corrected2 = savgol_filter(force_corrected2,window_length=25, polyorder=3)
-
 ###-------------------------------------------------------------------------###
 ###-------------------------------UNCERTAINTY-------------------------------###
 ###-------------------------------------------------------------------------###
-no_bins = 20
-means_variance = np.zeros([no_bins,2])
-free_theta = get_theta(freeswing)[free_start:]
-free_p = get_gradient(freeswing)
-free_theta_double_dot = np.gradient(freeswing[:,3][free_start:],freeswing[:,0][free_start:])
-free_filtered_theta_double_dot = savgol_filter(free_theta_double_dot,window_length=25, polyorder=3)
-free_force = free_filtered_theta_double_dot-free_p*np.sin(free_theta)
-fixed_force = np.zeros(len(free_force))
-for bin in range(no_bins):
-    bin_start = (bin-no_bins/2)*2*np.pi/no_bins
-    bin_end = (bin-no_bins/2+1)*2*np.pi/no_bins
-    bin_indices = np.where((free_theta>=bin_start)&(free_theta<=bin_end))
-    if np.size(bin_indices)>0:
-        means_variance[bin,0] = np.mean(free_force[bin_indices])
-        means_variance[bin,1] = np.var(free_force[bin_indices])
-        fixed_force[bin_indices] = free_force[bin_indices] - means_variance[bin,0]
-free_force_corrected = theta_correction_factor*free_filtered_theta_double_dot-gradient_correction_factor*free_p*np.sin(free_theta*theta_correction_factor+theta_offset)
+def remove_mean(data):
+    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)[0][0]
+    theta_double_dot = np.gradient(data[:,3],data[:,0])[start:]
+    filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
+    p = get_gradient(data)
+    theta = get_theta(data)[start:]
+    force = filtered_theta_double_dot-p*np.sin(theta)
+    no_bins = 20
+    means_variance = np.zeros([no_bins,2])
+    free_theta = get_theta(freeswing)[free_start:]
+    free_p = get_gradient(freeswing)
+    free_theta_double_dot = np.gradient(freeswing[:,3][free_start:],freeswing[:,0][free_start:])
+    free_filtered_theta_double_dot = savgol_filter(free_theta_double_dot,window_length=25, polyorder=3)
+    free_force = free_filtered_theta_double_dot-free_p*np.sin(free_theta)
+    fixed_force = filtered_theta_double_dot-p*np.sin(theta)
+    for bin in range(no_bins):
+        bin_start = (bin-no_bins/2)*2*np.pi/no_bins
+        bin_end = (bin-no_bins/2+1)*2*np.pi/no_bins
+        free_bin_indices = np.where((free_theta>=bin_start)&(free_theta<bin_end))
+        data_bin_indices = np.where((theta>=bin_start)&(theta<bin_end))
+        if np.size(free_bin_indices)>0:
+            means_variance[bin,0] = np.mean(free_force[free_bin_indices])
+            means_variance[bin,1] = np.var(free_force[free_bin_indices])
+            fixed_force[data_bin_indices] = force[data_bin_indices] - means_variance[bin,0]
+    return fixed_force,means_variance
 ###-------------------------------------------------------------------------###
 ###----------------------------------PLOTS----------------------------------###
 ###-------------------------------------------------------------------------###
-#Plot means with bins
-plt.plot(range(no_bins),means_variance[:,0])
-plt.title(r'Mean force measured in freeswing for each $\theta$ section')
-plt.xlabel(r'$\theta$ bin')
+#Plot mean and variance at each theta bin
+plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,0],label='Means in each theta bin')
+plt.xlabel(r'$\theta$ bin (degrees)')
+plt.ylabel('Mean force')
+plt.title(r'Mean force in each $\theta$ bin')
 plt.show()
-#Plot variances with bins
-plt.plot(range(no_bins),means_variance[:,1])
-plt.title(r'Variance of force measured in freeswing for each $\theta$ section')
-plt.xlabel(r'$\theta$ bin')
+plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,1],label='Variance in each theta bin')
+plt.xlabel(r'$\theta$ bin (degrees)')
+plt.ylabel('Force variance')
+plt.title(r'Force variance in each $\theta$ bin')
 plt.show()
-#Plot freeswing force with the mean corrected version
-plt.plot(freeswing[:,0][free_start:],free_theta,label=r'$\theta$')
-plt.plot(freeswing[:,0][free_start:],free_force,label='Force measured')
-plt.plot(freeswing[:,0][free_start:],free_force_corrected,label='Force with parameter corrections')
-plt.plot(freeswing[:,0][free_start:],fixed_force,label='Measured for corrected with averages')
-plt.title('Force measured in freeswing and mean corrected version')
-plt.xlabel('times (s)')
-plt.legend()
-plt.show()
-#Plot line fit through theta double dot vs sin(theta) relationship
-x = np.sin(theta[start:])
-y = filtered_theta_double_dot[start:]
-x_corrected=np.sin(theta_corrected2[start:])
-y_corrected=filtered_theta_double_dot[start:]*theta_correction_factor2
-plt.plot(x,y,'.',label='Raw measurements') #plot all the data points
-plt.plot(x_corrected,y_corrected,'.',label='Corrected data') #plot all the data points
-plt.plot(x,p*x,label='Line fit through origin of original points') #plot the fitted line, through the origin
-plt.plot(x_corrected,p_corrected2*x_corrected,label='Line fit through origin of corrected points')
-plt.xlabel(r'sin($\theta$)')
-plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
-plt.title(r'$\"{\theta}$ vs sin($\theta$) with a line fitted through')
-plt.legend()
-plt.show()
-
-#Force, theta and theta_dot vs time
-plt.plot(timestamps[start:],smooth_force,label="Force measurement (Smoothed)")
-plt.plot(timestamps[start:],smooth_force_corrected,label="Corrected force measurement (Smoothed)")
-plt.plot(timestamps[start:],theta_corrected[start:],label=r'$\theta$')
-plt.plot(timestamps[start:],theta_dot_corrected[start:],label=r'$\dot{\theta}$')
-plt.axhline(0,color='b',linestyle='--')
+#Plot force vs time for measured force, parameter corrected forces and mean corrected force
+plt.plot(timestamps[start:],force,label='no correction')
+plt.plot(no_force_times,no_force_force,'.',label='no applied force')
+plt.plot(timestamps[start:],force_corrected2,label='2nd correction')
+plt.plot(timestamps[start:],remove_mean(userinput)[0],label='Mean removed')
 plt.xlabel(r't(s)')
 plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
-plt.title(r'$\frac{T}{J}$ vs time')
-plt.legend()
-plt.show()
-
-#Plot Force vs (mlg/J)sin(theta)
-plt.plot(-p*np.sin(theta[start:]),smooth_force,label="As measured")
-plt.plot(-p_corrected2*np.sin(theta_corrected2[start:]),smooth_force_corrected2,label="Corrected")
-plt.xlabel(r'$\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
-plt.ylabel(r'$\frac{T}{J}$')
-plt.title(r'$\frac{T}{J}$ vs $\frac{mgl}{J}sin(\theta)$')
-plt.legend()
-plt.show()
-
-#Plot Force vs velocity
-plt.plot(theta_dot[start:],smooth_force,label="As measured")
-plt.plot(theta_dot_corrected[start:],smooth_force_corrected,label="Corrected")
-plt.xlabel(r'$\dot{\theta}$')
-plt.ylabel(r'$\frac{T}{J}$')
-plt.title(r'Force vs $\dot{\theta}$')
+plt.title(r'Force vs time: As measured, parameter and mean corrected')
+plt.axhline(0,color='b',linestyle='--')
 plt.legend()
 plt.show()

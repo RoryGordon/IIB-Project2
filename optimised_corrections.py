@@ -8,12 +8,10 @@ from numpy import genfromtxt
 import scipy
 from scipy import integrate
 from scipy.optimize import least_squares
-from scipy.optimize import basinhopping
 from scipy.signal import find_peaks
 from scipy.signal import savgol_filter
 from scipy.integrate import cumtrapz
 from matplotlib import animation
-from statsmodels.graphics import tsaplots
 ###-------------------------------------------------------------------------###
 ###------------------------UNPACK DATA AND GET ZEROS------------------------###
 ###-------------------------------------------------------------------------###
@@ -155,15 +153,6 @@ theta_dot_corrected2 = theta_dot*theta_correction_factor2
 force_corrected2 = filtered_theta_double_dot[start:]*theta_correction_factor2-p_corrected2*np.sin(theta_corrected2[start:])
 smooth_force_corrected2 = savgol_filter(force_corrected2,window_length=25, polyorder=3)
 
-
-plt.plot(timestamps[start:],force,label='no correction')
-plt.plot(no_force_times,no_force_force,'.',label='no applied force')
-plt.plot(timestamps[start:],force_corrected,label='1st correction')
-plt.plot(timestamps[start:],force_corrected2,label='2nd correction')
-plt.legend()
-plt.show()
-#
-#
 # plt.plot(filtered_theta_double_dot[start:],np.sin(theta)[start:])
 # plt.plot(theta_correction_factor*filtered_theta_double_dot[start:],np.sin(theta_corrected)[start:])
 # plt.plot(theta_correction_factor2*filtered_theta_double_dot[start:],np.sin(theta_corrected2)[start:])
@@ -227,6 +216,7 @@ plt.show()
 #Force, theta and theta_dot vs time
 plt.plot(timestamps[start:],smooth_force,label="Force measurement (Smoothed)")
 plt.plot(timestamps[start:],smooth_force_corrected,label="Corrected force measurement (Smoothed)")
+plt.plot(timestamps[start:],smooth_force_corrected2,label='Force after 2nd correction (Smoothed)')
 plt.plot(timestamps[start:],theta_corrected[start:],label=r'$\theta$')
 plt.plot(timestamps[start:],theta_dot_corrected[start:],label=r'$\dot{\theta}$')
 plt.axhline(0,color='b',linestyle='--')
