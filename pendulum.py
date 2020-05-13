@@ -121,7 +121,6 @@ force_corrected = theta_correction_factor*filtered_theta_double_dot[start:]-p_co
 smooth_force_corrected = savgol_filter(force_corrected,window_length=25, polyorder=3)
 #get the indices where force is being applied and released
 peak_matrix = forcefinder(force_corrected)
-theta_dot_zeros,_ = find_peaks(abs(theta_dot[start:]),prominence=1)
 #get following data but when force isnt applied
 no_force_times = timestamps[start:]
 no_force_force = force
@@ -149,6 +148,37 @@ p_corrected2 = p*gradient_correction_factor2
 theta_dot_corrected2 = theta_dot*theta_correction_factor2
 force_corrected2 = filtered_theta_double_dot[start:]*theta_correction_factor2-p_corrected2*np.sin(theta_corrected2[start:])
 smooth_force_corrected2 = savgol_filter(force_corrected2,window_length=35, polyorder=3)
+#find zero crossings of theta_dot, i.e. when bell is at extremes
+theta_dot_zeros,_ = find_peaks(-abs(theta_dot[start:]))
+#Produce clean force curve
+noisy_peaks = find_peaks(-abs(smooth_force_corrected2),height=-0.5)[0]
+force_curve = np.zeros(len(force_corrected2))
+starts_and_ends = np.zeros([len(peak_matrix),2])
+force_in = np.zeros(len(smooth_force_corrected2))
+force_out = np.zeros(len(smooth_force_corrected2))
+energy_in = np.zeros(len(peak_matrix))
+energy_out = np.zeros(len(peak_matrix))
+power_in = np.zeros(len(peak_matrix))
+power_out = np.zeros(len(peak_matrix))
+count = 0
+for _ in peak_matrix[:,1]:
+    force_start = max(noisy_peaks[noisy_peaks<_])
+    force_end = min(noisy_peaks[noisy_peaks>_])
+    # starts_and_ends[count,0],starts_and_ends[count,1] = force_start,force_end
+    force_curve[force_start:force_end] = smooth_force_corrected2[force_start:force_end]
+    if force_start<theta_dot_zeros[count]:
+        force_out[force_start:theta_dot_zeros[count]] = force_curve[force_start:theta_dot_zeros[count]]
+    if force_end>theta_dot_zeros[count]:
+        force_in[theta_dot_zeros[count]:force_end] = force_curve[theta_dot_zeros[count]:force_end]
+    energy_in[count] = max(cumtrapz(abs(force_in)[force_start:force_end],initial=0))
+    energy_out[count] = max(cumtrapz(abs(force_out)[force_start:force_end],initial=0))
+    power_in[count] = sum(np.multiply(abs(theta_dot[start:])[force_start:force_end],abs(force_in)[force_start:force_end]))
+    power_out[count] = sum(np.multiply(abs(theta_dot[start:])[force_start:force_end],abs(force_out)[force_start:force_end]))
+    count += 1
+print(power_in)
+print(power_out)
+print(power_in-power_out)
+
 ###-------------------------------------------------------------------------###
 ###-------------------------------UNCERTAINTY-------------------------------###
 ###-------------------------------------------------------------------------###
@@ -178,17 +208,10 @@ def remove_mean(data):
             fixed_force[data_bin_indices] = force[data_bin_indices] - means_variance[bin,0]
     return fixed_force, means_variance
 
-peak_matrix2 = forcefinder(force_corrected2)
-little_peaks = find_peaks(-abs(smooth_force_corrected2),height=-0.5)[0]
-force_curve = np.zeros(len(force_corrected2))
-
-for _ in peak_matrix[:,1]:
-    force_start = max(little_peaks[little_peaks<_])
-    force_end = min(little_peaks[little_peaks>_])
-    force_curve[force_start:force_end] = smooth_force_corrected2[force_start:force_end]
-
-plt.plot(timestamps[start:],abs(smooth_force_corrected2))
-plt.plot(timestamps[start:],abs(force_curve))
+plt.plot(timestamps[start:][theta_dot_zeros],theta_dot[start:][theta_dot_zeros],'x')
+plt.plot(timestamps[start:],abs(force_in),'g')
+plt.plot(timestamps[start:],abs(force_out),'r')
+plt.plot(timestamps[start:],abs(theta_dot)[start:])
 # plt.plot(timestamps[start:],-abs(smooth_force_corrected2))
 # plt.plot(timestamps[start:][little_peaks],-abs(smooth_force_corrected2)[little_peaks],'x')
 plt.show()
@@ -230,7 +253,7 @@ plt.xlabel(r'sin($\theta$)')
 plt.ylabel(r'$\"{\theta}$(rad/$s^2$)')
 plt.title(r'$\"{\theta}$ vs sin($\theta$)')
 plt.show()
-
+"""
 #PENDULUM AND FORCE ANIMATION
 fig_pend = plt.figure()
 ax_pend = plt.axes(xlim=(-1.5, 1.5), ylim=(-1.5,1.5))
@@ -242,19 +265,19 @@ def init_pend():
     return bell, torque,
 #Animation function. This is called sequentially
 def animate_pend(i):
-    y = -np.cos(theta[i]) #Bell's y position
-    x = np.sin(theta[i]) #Bell's x position
+    y = -np.cos(theta[i+start]) #Bell's y position
+    x = np.sin(theta[i+start]) #Bell's x position
     bell.set_data(x, y)
-    x_torque = filtered_theta_double_dot[i]-p*np.sin(theta[i]) #Torque/J at time i
+    x_torque = force_curve[i] #Torque/J at time i
     torque.set_data(x_torque/3,0)
     return bell, torque,
 #Call the animator. blit=True means only re-draw the parts that have changed.
-anim_pend = animation.FuncAnimation(fig_pend, animate_pend, init_func=init_pend, frames=len(theta), interval=20, blit=True)
+anim_pend = animation.FuncAnimation(fig_pend, animate_pend, init_func=init_pend, frames=len(theta[start:]), interval=20, blit=True)
 #anim_pend.save('2sidepush_force.gif', fps=50, extra_args=['-vcodec', 'libx264'])
 plt.title('Bell swinging and force applied')
 plt.legend()
 plt.show()
-
+"""
 #FORCE vs VELOCITY ANIMATION
 fig_force_vel = plt.figure()
 ax_force_vel = plt.axes(xlim=(-5, 5), ylim=(-3,3))
