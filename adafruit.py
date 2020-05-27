@@ -100,7 +100,7 @@ def update():
 secs = 0
 
 
-file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/userinput.csv'
+file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay26th/onesidepush4.csv'
 
 while secs<=60:
     (millis, accx, accy, gyrz, encoder) = update()

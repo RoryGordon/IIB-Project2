@@ -16,9 +16,9 @@ from matplotlib import animation
 ###------------------------UNPACK DATA AND GET ZEROS------------------------###
 ###-------------------------------------------------------------------------###
 #Gather and unpack data from CSV
-userinput_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/userinput.csv'
+userinput_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay26th/onesidepush.csv'
 userinput = genfromtxt(userinput_file,delimiter=',')
-freeswing_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay5th/freeswing.csv'
+freeswing_file = '/Users/shuowanghe/github/IIB-Project2/data/adafruitmay26th/freeswing.csv'
 freeswing = genfromtxt(freeswing_file,delimiter=',')
 timestamps,a_r,a_theta,theta_dot = userinput[:,0], userinput[:,1], userinput[:,2], userinput[:,3]
 #Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
@@ -26,9 +26,9 @@ theta_double_dot = np.gradient(theta_dot,timestamps)
 filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
 #Smooth the radial acceleration signal to find theta=zeros
 filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
-theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
+theta_zeros,_ = find_peaks(filtered_a_r,prominence=0.5)
 start = theta_zeros[0]
-free_start_zeros,_ = find_peaks(savgol_filter(freeswing[:,1],window_length=21, polyorder=2),prominence=5)
+free_start_zeros,_ = find_peaks(savgol_filter(freeswing[:,1],window_length=21, polyorder=2),prominence=0.5)
 free_start = free_start_zeros[0]
 ###-------------------------------------------------------------------------###
 ###--------------------------------FUNCTIONS--------------------------------###
@@ -40,7 +40,7 @@ def get_theta(data):
     a_r = data[:,1]
     theta_dot = data[:,3]
     filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
-    theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
+    theta_zeros,_ = find_peaks(filtered_a_r,prominence=0.5)
     start = theta_zeros[0]
     #integrate theta and distribute drift before every zero
     theta_int_once = cumtrapz(theta_dot[start:],timestamps[start:],initial=0)
@@ -62,7 +62,7 @@ def get_gradient(data):
     theta = get_theta(data) #get drift corrected theta from the data    #find theta=zeros
     timestamps = data[:,0]
     theta_dot = data[:,3]
-    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=5)[0][0]
+    start = find_peaks(savgol_filter(data[:,1],window_length=21, polyorder=2),prominence=0.5)[0][0]
     theta_double_dot = np.gradient(theta_dot,timestamps)
     x = np.sin(theta)[start:]
     y = savgol_filter(theta_double_dot,window_length=25, polyorder=3)[start:]
@@ -149,35 +149,184 @@ theta_dot_corrected2 = theta_dot*theta_correction_factor2
 force_corrected2 = filtered_theta_double_dot[start:]*theta_correction_factor2-p_corrected2*np.sin(theta_corrected2[start:])
 smooth_force_corrected2 = savgol_filter(force_corrected2,window_length=35, polyorder=3)
 #find zero crossings of theta_dot, i.e. when bell is at extremes
-theta_dot_zeros,_ = find_peaks(-abs(theta_dot[start:]))
+theta_dot_zeros,_ = find_peaks(-abs(theta_dot_corrected2[start:]),prominence=1)
 #Produce clean force curve
 noisy_peaks = find_peaks(-abs(smooth_force_corrected2),height=-0.5)[0]
 force_curve = np.zeros(len(force_corrected2))
-starts_and_ends = np.zeros([len(peak_matrix),2])
+starts_and_ends = np.zeros((len(peak_matrix),2))
 force_in = np.zeros(len(smooth_force_corrected2))
 force_out = np.zeros(len(smooth_force_corrected2))
-energy_in = np.zeros(len(peak_matrix))
-energy_out = np.zeros(len(peak_matrix))
-power_in = np.zeros(len(peak_matrix))
-power_out = np.zeros(len(peak_matrix))
+energy = np.zeros((len(peak_matrix),2))
+power = np.zeros((len(peak_matrix),2))
 count = 0
+
+force_peaks = [0] * (len(theta_zeros)-1)
+
+for i in range(len(theta_zeros)-1):
+    section = range(theta_zeros[i],theta_zeros[i+1])-start
+    force_section = force[section]
+    if theta[start:][section[0]+10]<0: #if theta is pointing down, then flip the force section
+        force_section *= -1
+    force_peaks[i] = np.argmax(force[find_peaks(-force_section)[0]])+section[0]
+    # force_range_peaks = find_peaks(abs(low_smooth_force)[section],prominence=0)
+    # mini_peaks_before,_ = find_peaks(abs(low_smooth_force)[prev_peak:i],prominence=0)
+    # begin = mini_peaks_before[-1]+prev_peak
+    # prev_end = mini_peaks_before[0]+prev_peak
+    # if count != len(peaks)-1:
+    #     peak_matrix[count,0] = begin
+    # if count != 0:
+    #     peak_matrix[count-1,2] = prev_end
+
+# plt.plot(timestamps,theta,label='theta')
+# plt.plot(timestamps[start:],force,label='force')
+# plt.plot(timestamps[start:][force_peaks],force[force_peaks],'x',label='force peaks')
+# plt.show()
+#
+# peaks = find_peaks(abs(force),prominence=0,distance=25)[0]
+# smoothed_peaks = find_peaks(abs(low_smooth_force),prominence=0,distance=25)[0]
+# plt.plot(timestamps,theta,label='theta')
+# plt.plot(timestamps[start:],force,label='force')
+# plt.plot(timestamps[start:][peaks],force[peaks],'x',label='force peaks')
+# plt.plot(timestamps[start:],low_smooth_force,label='low smooth')
+# plt.plot(timestamps[start:][smoothed_peaks],low_smooth_force[smoothed_peaks],'x',label='peaks for low smooth force')
+# # plt.plot(timestamps[start:],smooth_force,label='smooth')
+# plt.legend()
+# plt.show()
+
+
+
 for _ in peak_matrix[:,1]:
     force_start = max(noisy_peaks[noisy_peaks<_])
     force_end = min(noisy_peaks[noisy_peaks>_])
     # starts_and_ends[count,0],starts_and_ends[count,1] = force_start,force_end
     force_curve[force_start:force_end] = smooth_force_corrected2[force_start:force_end]
-    if force_start<theta_dot_zeros[count]:
-        force_out[force_start:theta_dot_zeros[count]] = force_curve[force_start:theta_dot_zeros[count]]
-    if force_end>theta_dot_zeros[count]:
-        force_in[theta_dot_zeros[count]:force_end] = force_curve[theta_dot_zeros[count]:force_end]
-    energy_in[count] = max(cumtrapz(abs(force_in)[force_start:force_end],initial=0))
-    energy_out[count] = max(cumtrapz(abs(force_out)[force_start:force_end],initial=0))
-    power_in[count] = sum(np.multiply(abs(theta_dot[start:])[force_start:force_end],abs(force_in)[force_start:force_end]))
-    power_out[count] = sum(np.multiply(abs(theta_dot[start:])[force_start:force_end],abs(force_out)[force_start:force_end]))
+    nearest_theta_dot_zero = theta_dot_zeros[abs(_-theta_zeros).argmin()]
+    if force_start<nearest_theta_dot_zero:
+        force_out[force_start:nearest_theta_dot_zero] = force_curve[force_start:nearest_theta_dot_zero]
+    if force_end>nearest_theta_dot_zero:
+        force_in[nearest_theta_dot_zero:force_end] = force_curve[nearest_theta_dot_zero:force_end]
+    energy[count,0] = max(cumtrapz(abs(force_in)[force_start:force_end],initial=0))
+    energy[count,1] = max(cumtrapz(abs(force_out)[force_start:force_end],initial=0))
+    power[count,0] = sum(np.multiply(abs(theta_dot_corrected2[start:])[force_start:force_end],abs(force_in)[force_start:force_end]))
+    power[count,1] = sum(np.multiply(abs(theta_dot_corrected2[start:])[force_start:force_end],abs(force_out)[force_start:force_end]))
     count += 1
-print(power_in)
-print(power_out)
-print(power_in-power_out)
+
+
+
+# plt.plot(timestamps[start:],force_curve)
+# plt.plot(timestamps[start:],theta_dot[start:])
+plt.plot(timestamps[start:],np.multiply(theta_dot[start:],force_curve))
+plt.xlabel(r'time (s)')
+plt.ylabel(r'Power input $\frac{T}{J}\dot{\theta}(s^{-3})$')
+plt.show()
+stored_energy = cumtrapz(np.multiply(theta_dot[start:],force_curve),initial=0) #starts at start
+energy_zeros = find_peaks(-stored_energy)[0] #starts at start
+energy_start = energy_zeros[0] #starts at start
+zero_energy_line = np.polyfit(timestamps[start:][energy_zeros],stored_energy[start:][energy_zeros],deg=1)[0]
+stored_energy = stored_energy[energy_start:]
+stored_energy_times = timestamps[start+energy_start:]-timestamps[start+energy_start]
+energy_zeros -= energy_zeros[0]
+plt.plot(stored_energy_times,stored_energy,label='Stored energy')
+plt.plot(stored_energy_times[energy_zeros],stored_energy[energy_zeros],'x',label='Energy "zeros"')
+plt.plot(np.array([0,60]),np.array([0,60])*zero_energy_line,'--',linewidth=0.5,label='Line fitting energy "zeros"')
+plt.xlabel(r'time (s)')
+plt.ylabel(r'System energy $\int{\frac{T}{J}\dot{\theta}}dt(s^{-2})$')
+plt.legend()
+plt.show()
+
+plt.plot(stored_energy_times,stored_energy-stored_energy_times*zero_energy_line,label='Stored energy accounting for friction')
+plt.plot(timestamps[start:][theta_dot_zeros]-timestamps[start:][theta_dot_zeros[0]],np.zeros(len(theta_dot_zeros)),'x')
+plt.axhline(linestyle='--',linewidth=0.5)
+plt.xlabel(r'time (s)')
+plt.ylabel(r'System energy adjusted for friction $\int{\frac{T}{J}\dot{\theta}}dt(s^{-2})$')
+plt.show()
+
+plt.plot(stored_energy_times,stored_energy-stored_energy_times*zero_energy_line,label='Stored energy accounting for friction')
+energy_calculation = 0.5*(1-p_corrected2*100/9.81)*theta_dot - p_corrected2*(1-np.cos(theta))
+plt.plot(timestamps-timestamps[start+energy_start],energy_calculation,label='Energy Calculated')
+plt.axhline(linestyle='--',linewidth=0.5)
+plt.xlabel(r'time (s)')
+plt.ylabel(r'System energy calculated $\int{\frac{T}{J}\dot{\theta}}dt(s^{-2})$')
+plt.show()
+
+# plt.plot(timestamps[start:],theta_corrected2[start:])
+# plt.plot(timestamps[start:][theta_dot_zeros],theta_corrected2[start:][theta_dot_zeros],'x')
+plt.plot((stored_energy-stored_energy_times*zero_energy_line)[energy_zeros],abs(theta_corrected2[start:][theta_dot_zeros]),'x')
+correlation = np.polyfit((stored_energy-stored_energy_times*zero_energy_line)[energy_zeros],abs(theta_corrected2[start:][theta_dot_zeros]),deg=1)
+plt.plot(np.array([-15,0]),np.array([-15,0])*correlation[0]+correlation[1],'--',linewidth=0.5)
+err = np.mean(abs(abs(theta_corrected2[start:][theta_dot_zeros])-((stored_energy-stored_energy_times*zero_energy_line)[energy_zeros]*correlation[0]+correlation[1])),axis=0)
+plt.ylabel(r'Angle at max (rad)')
+plt.xlabel(r'System energy calculated $\int{\frac{T}{J}\dot{\theta}}dt(s^{-2})$')
+plt.show()
+
+# print(np.column_stack((power,power[:,0]-power[:,1])))
+
+# theta_peaks = find_peaks(abs(get_theta(freeswing)[free_start:]))[0]
+# exponent = np.polyfit(freeswing[free_start:,0][theta_peaks],np.log(abs(get_theta(freeswing)[free_start:][theta_peaks])),1)
+# plt.plot(freeswing[free_start:,0],abs(get_theta(freeswing)[free_start:]))
+# plt.plot(freeswing[free_start:,0],np.exp(exponent[1])*np.exp(exponent[0]*freeswing[free_start:,0]))
+
+# plt.plot(timestamps[start:],force,label='force')
+# plt.plot(timestamps[start:],force_corrected,label='force corrected')
+# plt.plot(timestamps[start:],force_corrected2,label='force corrected 2')
+# plt.plot(no_force_times,no_force_force,'.')
+plt.show()
+#
+# plt.legend()
+
+# plt.plot(timestamps[start:],theta_corrected2[start:],label=r'$\theta$')
+#
+# plt.plot(timestamps,filtered_a_r)
+# theta_zero = find_peaks(filtered_a_r,prominence=0.5)[0]
+# plt.plot(timestamps[theta_zero],filtered_a_r[theta_zero],'x')
+plt.plot(timestamps[start:],theta_corrected2[start:])
+plt.plot(timestamps[start:],force)
+# plt.plot(timestamps[start:],smooth_force_corrected)
+plt.show()
+#
+#
+#
+# plt.plot(timestamps[start:],force_corrected)
+# plt.plot(timestamps[start:],force_corrected2)
+# plt.plot(timestamps[start:][peak_matrix[:,1]],force_corrected2[peak_matrix[:,1]])
+# plt.plot(no_force_times,no_force_force,'.')
+#
+#
+# plt.plot(timestamps,theta_dot)
+# plt.plot(timestamps[start:][theta_dot_zeros],theta_corrected2[start:][theta_dot_zeros],'x',label=r'$\theta$ maximums')
+abs(theta_corrected2[start:][theta_dot_zeros])
+theta_differences = np.zeros(len(theta_dot_zeros)-1)
+energy_differences = np.zeros(len(theta_dot_zeros)-1)
+for i in range(len(theta_dot_zeros)-1):
+    theta_differences[i] = abs(np.cos(theta_corrected2[start:][theta_dot_zeros[i+1]]))-abs(np.cos(theta_corrected2[start:][theta_dot_zeros[i]]))
+    energy_differences[i] = power[i,0]-power[i+1,1]
+#
+# plt.plot(energy_differences,theta_differences,'.')
+#
+# plt.plot(timestamps[start:][theta_dot_zeros],abs(theta_dot_corrected2[start:][theta_dot_zeros]),'x',label=r'$\theta$')
+# # plt.plot(timestamps[start:][peak_matrix[:,1]],abs(force_curve)[peak_matrix[:,1]],'x')
+plt.plot(timestamps[start:],abs(force_in),'g')
+plt.plot(timestamps[start:],abs(force_out),'r')
+plt.xlabel('time (s)')
+plt.ylabel(r'$\frac{T}{J}$(rad$s^{-2}$)')
+# plt.plot(timestamps[start:],theta_corrected2[start:])
+# plt.plot(timestamps[start:],abs(theta_dot)[start:])
+# plt.plot(timestamps[start:],-abs(smooth_force_corrected2))
+# plt.plot(timestamps[start:][theta_dot_zeros],theta_dot[start:][theta_dot_zeros],'x')
+# plt.plot(timestamps[start:][noisy_peaks],-abs(smooth_force_corrected2)[noisy_peaks],'x')
+plt.show()
+# plt.plot(timestamps[start:],theta_dot[start:])
+# plt.plot(timestamps[start:][theta_dot_zeros],theta_dot[start:][theta_dot_zeros],'x')
+# plt.plot(timestamps[start:],theta[start:])
+# plt.plot(timestamps[theta_zeros],theta[theta_zeros],'x')
+
+# plt.plot(timestamps[start:],abs(force_corrected2))
+# plt.plot(timestamps[start:],abs(smooth_force_corrected2))
+# plt.plot(timestamps[start:],-abs(force_corrected2))
+# plt.show()
+# plt.plot(timestamps[start:][peak_matrix2[:,0]],abs(smooth_force_corrected2)[peak_matrix2[:,0]],'x')
+# plt.plot(timestamps[start:][peak_matrix2[:,2]],abs(smooth_force_corrected2)[peak_matrix2[:,2]],'x')
+# plt.show()
 
 ###-------------------------------------------------------------------------###
 ###-------------------------------UNCERTAINTY-------------------------------###
@@ -207,23 +356,6 @@ def remove_mean(data):
             means_variance[bin,1] = np.var(free_force[free_bin_indices])
             fixed_force[data_bin_indices] = force[data_bin_indices] - means_variance[bin,0]
     return fixed_force, means_variance
-
-plt.plot(timestamps[start:][theta_dot_zeros],theta_dot[start:][theta_dot_zeros],'x')
-plt.plot(timestamps[start:],abs(force_in),'g')
-plt.plot(timestamps[start:],abs(force_out),'r')
-plt.plot(timestamps[start:],abs(theta_dot)[start:])
-# plt.plot(timestamps[start:],-abs(smooth_force_corrected2))
-# plt.plot(timestamps[start:][little_peaks],-abs(smooth_force_corrected2)[little_peaks],'x')
-plt.show()
-
-# plt.plot(timestamps[start:],abs(force_corrected2))
-# plt.plot(timestamps[start:],abs(smooth_force_corrected2))
-# plt.plot(timestamps[start:],-abs(force_corrected2))
-# plt.show()
-# plt.plot(timestamps[start:][peak_matrix2[:,0]],abs(smooth_force_corrected2)[peak_matrix2[:,0]],'x')
-# plt.plot(timestamps[start:][peak_matrix2[:,2]],abs(smooth_force_corrected2)[peak_matrix2[:,2]],'x')
-# plt.show()
-
 """
 ###-------------------------------------------------------------------------###
 ###--------------------------------ANIMATIONS-------------------------------###
@@ -265,8 +397,8 @@ def init_pend():
     return bell, torque,
 #Animation function. This is called sequentially
 def animate_pend(i):
-    y = -np.cos(theta[i+start]) #Bell's y position
-    x = np.sin(theta[i+start]) #Bell's x position
+    y = -np.cos(theta_corrected2[i+start]) #Bell's y position
+    x = np.sin(theta_corrected2[i+start]) #Bell's x position
     bell.set_data(x, y)
     x_torque = force_curve[i] #Torque/J at time i
     torque.set_data(x_torque/3,0)

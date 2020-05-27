@@ -22,7 +22,9 @@ freeswing = genfromtxt(freeswing_file,delimiter=',')
 timestamps,a_r,a_theta,theta_dot = userinput[:,0], userinput[:,1], userinput[:,2], userinput[:,3]
 #Differentiate gyro signal to get angular acceleration, then smooth with Sav-Gol filter
 theta_double_dot = np.gradient(theta_dot,timestamps)
+free_theta_double_dot = np.gradient(freeswing[:,3],freeswing[:,0])
 filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
+free_filtered_theta_double_dot = savgol_filter(free_theta_double_dot,window_length=25, polyorder=3)
 #Smooth the radial acceleration signal to find theta=zeros
 filtered_a_r = savgol_filter(a_r,window_length=21, polyorder=2)
 theta_zeros,_ = find_peaks(filtered_a_r,prominence=5)
@@ -107,11 +109,16 @@ print("theta factor: ",res.x[0],"\ngradient factor: ",res.x[1],"\ntheta offset: 
 theta_correction_factor,gradient_correction_factor,theta_offset = res.x[0],res.x[1],res.x[2]
 #get the -mlg/J gradient from fitting the userinput graph
 p = get_gradient(userinput)
+free_p = get_gradient(freeswing)
 #Use re-integrated, drift corrected theta from now on
 theta = get_theta(userinput)
+free_theta = get_theta(freeswing)
 #Calculate some force quantity T/J using just the userinput data
 force = filtered_theta_double_dot[start:]-p*np.sin(theta[start:])
 smooth_force = savgol_filter(force,window_length=25, polyorder=3)
+#Calculate some force quantity T/J using just the freeswing data
+free_force = free_filtered_theta_double_dot[free_start:]-free_p*np.sin(free_theta[free_start:])
+free_smooth_force = savgol_filter(free_force,window_length=25, polyorder=3)
 #Calculate it post corrections from freeswing data
 p_corrected = p*gradient_correction_factor
 theta_corrected = theta*theta_correction_factor+theta_offset
@@ -157,44 +164,84 @@ def remove_mean(data):
     filtered_theta_double_dot = savgol_filter(theta_double_dot,window_length=25, polyorder=3)
     p = get_gradient(data)
     theta = get_theta(data)[start:]
+    vel = data[:,3][start:]
     force = filtered_theta_double_dot-p*np.sin(theta)
-    no_bins = 20
-    means_variance = np.zeros([no_bins,2])
+    no_bins = 50
+    theta_means_variance = np.zeros([no_bins,2])
+    vel_means_variance = np.zeros([no_bins,2])
     free_theta = get_theta(freeswing)[free_start:]
+    free_vel = freeswing[:,3][free_start:]
     free_p = get_gradient(freeswing)
-    free_theta_double_dot = np.gradient(freeswing[:,3][free_start:],freeswing[:,0][free_start:])
+    free_theta_double_dot = np.gradient(free_vel,freeswing[:,0][free_start:])
     free_filtered_theta_double_dot = savgol_filter(free_theta_double_dot,window_length=25, polyorder=3)
     free_force = free_filtered_theta_double_dot-free_p*np.sin(free_theta)
-    fixed_force = filtered_theta_double_dot-p*np.sin(theta)
+    fixed_theta_force = filtered_theta_double_dot-p*np.sin(theta)
+    fixed_vel_force = filtered_theta_double_dot-p*np.sin(theta)
     for bin in range(no_bins):
-        bin_start = (bin-no_bins/2)*2*np.pi/no_bins
-        bin_end = (bin-no_bins/2+1)*2*np.pi/no_bins
-        free_bin_indices = np.where((free_theta>=bin_start)&(free_theta<bin_end))
-        data_bin_indices = np.where((theta>=bin_start)&(theta<bin_end))
-        if np.size(free_bin_indices)>0:
-            means_variance[bin,0] = np.mean(free_force[free_bin_indices])
-            means_variance[bin,1] = np.var(free_force[free_bin_indices])
-            fixed_force[data_bin_indices] = force[data_bin_indices] - means_variance[bin,0]
-    return fixed_force,means_variance
+        theta_bin_start = (bin-no_bins/2)*2*np.pi/no_bins
+        theta_bin_end = (bin-no_bins/2+1)*2*np.pi/no_bins
+        free_theta_bin_indices = np.where((free_theta>=theta_bin_start)&(free_theta<theta_bin_end))
+        data_theta_bin_indices = np.where((theta>=theta_bin_start)&(theta<theta_bin_end))
+        if np.size(free_theta_bin_indices)>0:
+            theta_means_variance[bin,0] = np.mean(free_force[free_theta_bin_indices])
+            theta_means_variance[bin,1] = np.var(free_force[free_theta_bin_indices])
+            fixed_theta_force[data_theta_bin_indices] = force[data_theta_bin_indices] - theta_means_variance[bin,0]
+
+        vel_bin_start = (bin-no_bins/2)*(max(theta_dot)-min(theta_dot))/no_bins
+        vel_bin_end = (bin-no_bins/2+1)*(max(theta_dot)-min(theta_dot))/no_bins
+        free_vel_bin_indices = np.where((free_vel>=vel_bin_start)&(free_vel<vel_bin_end))
+        data_vel_bin_indices = np.where((vel>=vel_bin_start)&(vel<vel_bin_end))
+        if np.size(free_vel_bin_indices)>0:
+            vel_means_variance[bin,0] = np.mean(free_force[free_vel_bin_indices])
+            vel_means_variance[bin,1] = np.var(free_force[free_vel_bin_indices])
+            fixed_vel_force[data_vel_bin_indices] = force[data_vel_bin_indices] - vel_means_variance[bin,0]
+
+    return fixed_theta_force,theta_means_variance,vel_means_variance,fixed_vel_force,
 ###-------------------------------------------------------------------------###
 ###----------------------------------PLOTS----------------------------------###
 ###-------------------------------------------------------------------------###
-#Plot mean and variance at each theta bin
-plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,0],label='Means in each theta bin')
+#Plot mean and variance at each theta bin (theta corrected)
+plt.plot(free_theta[free_start:]*180/np.pi,free_force,'.',linewidth=0.5,label=r'Datapoints')
+plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,0],label=r'Mean force')
 plt.xlabel(r'$\theta$ bin (degrees)')
-plt.ylabel('Mean force')
+plt.ylabel(r'Mean force $\frac{T}{J}(s^{-2})$')
 plt.title(r'Mean force in each $\theta$ bin')
+plt.legend()
 plt.show()
-plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,1],label='Variance in each theta bin')
+plt.plot(np.linspace(-180,180,num=len(remove_mean(userinput)[1])),remove_mean(userinput)[1][:,1],label=r'Force variance')
 plt.xlabel(r'$\theta$ bin (degrees)')
-plt.ylabel('Force variance')
+plt.ylabel(r'$\frac{T}{J}$ force variance')
 plt.title(r'Force variance in each $\theta$ bin')
 plt.show()
-#Plot force vs time for measured force, parameter corrected forces and mean corrected force
+#Plot mean and variance at each theta bin (vel corrected)
+plt.plot(freeswing[:,3][free_start:],free_force,'.',linewidth=0.5,label=r'Datapoints')
+plt.plot(np.linspace(min(theta_dot),max(theta_dot),num=len(remove_mean(userinput)[2])),remove_mean(userinput)[2][:,0],label=r'Mean force')
+plt.xlabel(r'$\dot{\theta}$ bin (rad$s^{-1}$)')
+plt.ylabel(r'Mean force $\frac{T}{J}(s^{-2})$')
+plt.title(r'Mean force in each $\dot{\theta}$ bin')
+plt.legend()
+plt.show()
+plt.plot(np.linspace(min(theta_dot),max(theta_dot),num=len(remove_mean(userinput)[2])),remove_mean(userinput)[2][:,1],label=r'Force variance')
+plt.xlabel(r'$\dot{\theta}$ bin (rad$s^{-1}$)')
+plt.ylabel(r'$\frac{T}{J}$ force variance')
+plt.title(r'Force variance in each $\dot{\theta}$ bin')
+plt.show()
+#Plot force vs time for measured force, parameter corrected forces and mean corrected force (theta)
 plt.plot(timestamps[start:],force,label='no correction')
 plt.plot(no_force_times,no_force_force,'.',label='no applied force')
 plt.plot(timestamps[start:],force_corrected2,label='2nd correction')
 plt.plot(timestamps[start:],remove_mean(userinput)[0],label='Mean removed')
+plt.xlabel(r't(s)')
+plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
+plt.title(r'Force vs time: As measured, parameter and mean corrected')
+plt.axhline(0,color='b',linestyle='--')
+plt.legend()
+plt.show()
+#Plot force vs time for measured force, parameter corrected forces and mean corrected force (vel)
+plt.plot(timestamps[start:],force,label='no correction')
+plt.plot(no_force_times,no_force_force,'.',label='no applied force')
+plt.plot(timestamps[start:],force_corrected2,label='2nd correction')
+plt.plot(timestamps[start:],remove_mean(userinput)[3],label='Mean removed')
 plt.xlabel(r't(s)')
 plt.ylabel(r'$\"{\theta}+\frac{mgl}{J}sin(\theta)$(rad/$s^2$)')
 plt.title(r'Force vs time: As measured, parameter and mean corrected')
